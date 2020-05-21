@@ -1,0 +1,57 @@
+# *.[oa]
+# *~
+# For a project mostly in C, the following would be a good set of
+# Lines that start with '#' are comments.
+# exclude patterns (uncomment them if you want to use them):
+# git ls-files --others --exclude-from=.git/info/exclude
+*.aps
+*.bak
+*.bsc
+*.cache
+*.csproj.user
+*.dep
+*.exp
+*.idb
+*.ilk 
+*.ldf
+*.log
+*.mdf
+*.ncb
+*.obj
+*.opensdf
+*.opt
+*.pch
+*.pdb
+*.plg
+*.psess
+*.rar
+*.res
+*.sbr
+*.sdf
+*.suo
+*.swp
+*.user
+*.user
+*.vbw
+*.vcxproj.user
+*.vsp
+*ReSharper*
+*\ipch
+*\obj
+*resharper*
+.svn
+Thumbs.db
+.DS_Store
+Debug
+Release
+MTGOX_Release
+_compareTemp
+_notes
+aspnet_client
+httpd.parse.errors
+unittestlog.txt
+packages/
+publish/
+*.VC.db
+*.VC.opendb
+.vs/
