@@ -15,8 +15,6 @@ struct PluginSettings
     };
 
     std::string Groups;
-    time_t SessionBeginTimeOffset;
-    time_t SessionEndTimeOffset;
     std::map<int, std::shared_ptr<Symbol>> Symbols;
     std::vector<boost::gregorian::greg_weekday> SkipDays;
 

@@ -51,23 +51,6 @@ public:
                 continue;
             }
 
-            if (name == "SessionTime") 
-            {
-                std::string value = pluginbase::tools::WideToString(param->Value()).c_str();
-                //check value
-                std::regex temp("(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]-(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]");
-                if (!regex_match(value, temp))
-                {
-                    LOG_FILE() << "Cannot parse '" << name << "' value [ " << value << " ]. Skip";
-                    continue;
-                }
-
-                auto arr = getSplittedArrayByDelimiter(value, '-');
-                pluginSettings.SessionBeginTimeOffset = getTimeFromString(arr[0]);
-                pluginSettings.SessionBeginTimeOffset = getTimeFromString(arr[1]);
-                continue;
-            }
-
             if (name == "SkipDays")
             {
                 std::string value = pluginbase::tools::WideToString(param->Value()).c_str();
