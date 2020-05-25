@@ -187,6 +187,8 @@ public:
     {
         try 
         {
+            LOCK();
+
             std::string s = pluginbase::tools::WideToString(symbol).c_str();
             auto symbolObj = pluginSettings.Symbols.find(s);
             if (symbolObj == pluginSettings.Symbols.end())
