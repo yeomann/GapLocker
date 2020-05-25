@@ -41,6 +41,9 @@
     <ClInclude Include="Models\PluginSettings.h">
       <Filter>Header Files\Models</Filter>
     </ClInclude>
+    <ClInclude Include="Symbol.h">
+      <Filter>Header Files\Models</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

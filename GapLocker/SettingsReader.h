@@ -2,6 +2,7 @@
 
 #include "stdafx.h"
 #include "Models/PluginSettings.h"
+#include "Symbol.h"
 #include <regex>
 
 class SettingsReader
@@ -76,7 +77,7 @@ public:
                 continue;
             }
 
-            parseAndCreateSymbol(pluginSettings, param, name, i);
+            parseAndCreateSymbol(pluginSettings, param, name);
         }
 
         // Update plugin config
@@ -112,7 +113,7 @@ public:
     }
 
 private:
-    static void parseAndCreateSymbol(PluginSettings& pluginSettings, WIMTConPluginParam& param, std::string name, int idx)
+    static void parseAndCreateSymbol(PluginSettings& pluginSettings, WIMTConPluginParam& param, std::string name)
     {
         try 
         {
@@ -127,13 +128,13 @@ private:
             auto arr1 = getSplittedArrayByDelimiter(value, ';');
             auto arr2 = getSplittedArrayByDelimiter(arr1[0], '-');
 
-            auto symbol = std::make_shared<PluginSettings::Symbol>();
+            auto symbol = std::make_shared<Symbol>();
             symbol->Name = name;
             symbol->BeginTimeOffset = getTimeFromString(arr2[0]);
             symbol->EndTimeOffset = getTimeFromString(arr2[1]);
             symbol->Points = std::stoi(arr1[1]);
 
-            pluginSettings.Symbols[idx] = symbol;
+            pluginSettings.Symbols[name] = symbol;
 
             LOG_FILE() << "Added new symbol '" << name << "' with parameters Time = " << arr1[0] << " (startOffset = "
                 << symbol->BeginTimeOffset << ", endOffset = " << symbol->EndTimeOffset << ") and Points = " << symbol->Points;
