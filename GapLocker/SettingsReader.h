@@ -132,6 +132,10 @@ private:
             symbol->Name = name;
             symbol->BeginTimeOffset = getTimeFromString(arr2[0]);
             symbol->EndTimeOffset = getTimeFromString(arr2[1]);
+
+            if (symbol->BeginTimeOffset > symbol->EndTimeOffset)
+                symbol->EndTimeOffset += SECONDS_IN_DAY;
+
             symbol->Points = std::stoi(arr1[1]);
 
             pluginSettings.Symbols[name] = symbol;
