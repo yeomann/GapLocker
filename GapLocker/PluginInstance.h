@@ -16,16 +16,18 @@
 // Need to subscribe/unsubscribe for each interface with IMTServerAPI::TickSubscribe / IMTServerAPi::TickUnsubscribe in CPluginInstance::Start() and CPluginInstance::Stop()
 class CPluginInstance : public pluginbase::Mt5Plugin,
     public IMTServerPlugin,
-    public IMTConPluginSink
+    public IMTConPluginSink,
+    public IMTTickSink
 {
 
 private:
     IMTServerAPI* serverApi;
+    MTServerInfo    serverInfo;
     CMTThread         thread;
 
     std::atomic<bool> isThreadActive;
 
-    PluginSettings userSettings;
+    PluginSettings pluginSettings;
 
     enum { LOOP_DELAY_IN_MILLISECONDS = 50 };
 
@@ -36,6 +38,7 @@ public:
         serverApi(nullptr)
     {
         SAFE_BEGIN_ALWAYS();
+        ZeroMemory(&serverInfo, sizeof(serverInfo));
         SAFE_END_ALWAYS();
     }
 
@@ -69,20 +72,37 @@ public:
         pluginbase::Mt5Plugin::Initialize(serverApi);
 
         LOG_FILE() << "Plugin starting...";
-
-        if ((retcode = serverApi->PluginSubscribe(this)) != MT_RET_OK)
-        {
-            throw std::exception("Cannot subscribe for plugin updates", retcode);
-        }
-
-        if ((retcode = ThreadStart()) != MT_RET_OK)
-        {
-            throw std::exception("Cannot start service thread", retcode);
-        }
-
-        pluginbase::Mt5Plugin::FlushLoggers();
         
-        return MT_RET_OK;
+        try
+        {
+            if ((retcode = serverApi->About(serverInfo)) != MT_RET_OK)
+            {
+                throw std::exception("Cannot get server info", retcode);
+            }
+
+            if ((retcode = serverApi->PluginSubscribe(this)) != MT_RET_OK)
+            {
+                throw std::exception("Cannot subscribe for plugin updates", retcode);
+            }
+
+            if ((retcode = serverApi->TickSubscribe(this)) != MT_RET_OK)
+            {
+                throw std::exception("Cannot subscribe for tick updates", retcode);
+            }
+
+            if ((retcode = ThreadStart()) != MT_RET_OK)
+            {
+                throw std::exception("Cannot start service thread", retcode);
+            }
+
+            pluginbase::Mt5Plugin::FlushLoggers();
+
+            return MT_RET_OK;
+        }
+        catch (const std::exception & ex)
+        {
+            LOG_FATAL() << "Plugin start failed with exception: " << ex.what();
+        }
 
         SAFE_END(MT_RET_ERROR);
     }
@@ -96,6 +116,7 @@ public:
             ThreadStop();
 
             serverApi->PluginUnsubscribe(this);
+            serverApi->TickUnsubscribe(this);
 
             serverApi = nullptr;
             LOG_FILE() << "Plugin stopped";
@@ -115,7 +136,16 @@ public:
             return(MT_RET_ERR_PARAMS);
         }
 
-        bool isReadedAllParams = SettingsReader::Read(serverApi, userSettings);
+        WIMTConPlugin plugin(serverApi);
+
+        MTAPIRES retcode;
+
+        if ((retcode = serverApi->PluginCurrent(plugin)) != MT_RET_OK)
+        {
+            return (retcode);
+        }
+
+        bool isReadedAllParams = SettingsReader::Read(serverApi, pluginSettings);
         if (!isReadedAllParams)
         {
             return (MT_RET_ERR_PARAMS);
@@ -139,10 +169,67 @@ public:
     {
         METHOD_BEGIN();
 
-        SettingsReader::Read(serverApi, userSettings);
-        SettingsReader::Print(userSettings);
+        if (serverApi == nullptr)
+        {
+            return;
+        }
+
+        SettingsReader::Read(serverApi, pluginSettings);
+        //SettingsReader::Print(userSettings);
 
         METHOD_END();
+    }
+
+    void OnTick(
+        LPCWSTR symbol,
+        const MTTickShort& tick
+    ) override
+    {
+        try 
+        {
+            LOCK();
+
+            std::string s = pluginbase::tools::WideToString(symbol).c_str();
+            auto symbolObj = pluginSettings.Symbols.find(s);
+            if (symbolObj == pluginSettings.Symbols.end())
+                return;
+
+            auto smb = symbolObj->second;
+
+            LOG_FILE() << "New tick for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
+
+            if (smb->GetTimeWithOffset(smb->BeginTimeOffset, tick.datetime) <= tick.datetime
+                && smb->GetTimeWithOffset(smb->EndTimeOffset, tick.datetime) > tick.datetime)
+            {
+                //check start
+                if (smb->SessionStartInfo == std::nullopt)
+                {
+                    smb->SessionStartInfo = tick;
+                    LOG_FILE() << "New START for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
+
+                    //CHECK POINTS
+
+                    return;
+                }
+
+                //set end
+                smb->SessionEndInfo = tick;
+                LOG_FILE() << "New END for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
+            }
+            else
+            {
+                //set start to null - we don't need it anymore
+                if (smb->SessionStartInfo != std::nullopt) 
+                {
+                    smb->SessionStartInfo = std::nullopt;
+                    LOG_FILE() << "Current session has ended.";
+                }
+            }
+        }
+        catch (const std::exception & ex)
+        {
+            LOG_FILE() << ex.what();
+        }
     }
 
 private:

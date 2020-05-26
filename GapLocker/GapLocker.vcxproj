@@ -112,6 +112,7 @@
     <ClInclude Include="PluginInstance.h" />
     <ClInclude Include="SettingsReader.h" />
     <ClInclude Include="stdafx.h" />
+    <ClInclude Include="Symbol.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
