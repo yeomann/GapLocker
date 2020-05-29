@@ -30,9 +30,7 @@ private:
     MTServerInfo    serverInfo;
     CMTThread         thread;
 
-    boost::shared_ptr<boost::asio::io_service> ioService;
-    boost::thread_group threadpool;
-    boost::shared_ptr<boost::asio::io_service::work> work;
+    pluginbase::Threadpool< std::function<void()> > threadPool;
 
     std::atomic<bool> isThreadActive;
 
@@ -46,7 +44,8 @@ private:
 
 public:
     CPluginInstance() :
-        serverApi(nullptr)
+        serverApi(nullptr),
+        threadPool([](const std::function<void()>& F) { SAFE_BEGIN_NAME(Threadpool_handler_func) F(); SAFE_END(); })
     {
         SAFE_BEGIN_ALWAYS();
         ZeroMemory(&serverInfo, sizeof(serverInfo));
@@ -101,22 +100,6 @@ public:
                 throw std::exception("Cannot subscribe for tick updates", retcode);
             }
 
-            boost::shared_ptr<boost::asio::io_service> io_service(
-                new boost::asio::io_service
-            );
-            ioService = io_service;
-
-            boost::shared_ptr< boost::asio::io_service::work > work1(
-                new boost::asio::io_service::work(*io_service)
-            );
-            work = work1;
-
-            //add 5 threads to threadpool
-            for (int i = 0; i < 5; i++) 
-            {
-                threadpool.create_thread(boost::bind(&CPluginInstance::WorkerThread, this));
-            }
-
             if ((retcode = ThreadStart()) != MT_RET_OK)
             {
                 throw std::exception("Cannot start service thread", retcode);
@@ -132,17 +115,6 @@ public:
         }
 
         SAFE_END(MT_RET_ERROR);
-    }
-
-    void WorkerThread()
-    {
-        LOG_FILE() << "[" << boost::this_thread::get_id()
-            << "] Thread Start";
-
-        ioService->run();
-
-        LOG_FILE() << "[" << boost::this_thread::get_id()
-            << "] Thread End";
     }
 
     MTAPIRES Stop()
@@ -263,13 +235,14 @@ public:
                     checkPrice(smb, buyPrice, sellPrice);
 
                     if (buyPrice != 0)
-                        ioService->post(boost::bind(&CPluginInstance::openLockPositions, this, buyPrice, s, IMTPosition::EnPositionAction::POSITION_BUY, tick.datetime * 1000));
+                        threadPool.push([this, buyPrice, s, tick]() {
+                        openLockPositions(buyPrice, s, IMTPosition::EnPositionAction::POSITION_BUY, tick.datetime * 1000);
+                            });
 
                     if (sellPrice != 0)
-                        ioService->post(boost::bind(&CPluginInstance::openLockPositions, this, sellPrice, s, IMTPosition::EnPositionAction::POSITION_SELL, tick.datetime * 1000));
-
-                    work.reset();
-                    //threadpool.join_all();
+                        threadPool.push([this, sellPrice, s, tick]() {
+                        openLockPositions(sellPrice, s, IMTPosition::EnPositionAction::POSITION_SELL, tick.datetime * 1000);
+                            });
 
                     return;
                 }
@@ -302,8 +275,6 @@ private:
 
         LOG_FILE() << "Thread-loop stopped";
 
-        threadpool.interrupt_all();
-        ioService->stop();
         isThreadActive = false;
         thread.Shutdown();
 
