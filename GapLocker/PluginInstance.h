@@ -12,11 +12,6 @@
 #include "pluginbase/license.h"
 #include "pluginbase/mt5Plugin.h"
 #include "SettingsReader.h"
-#include "math.h"
-
-#include <boost/asio/io_service.hpp>
-#include <boost/bind.hpp>
-#include <boost/thread/thread.hpp>
 
 // Need to subscribe/unsubscribe for each interface with IMTServerAPI::TickSubscribe / IMTServerAPi::TickUnsubscribe in CPluginInstance::Start() and CPluginInstance::Stop()
 class CPluginInstance : public pluginbase::Mt5Plugin,
@@ -197,7 +192,7 @@ public:
     {
         SAFE_BEGIN();
         LOCK();
-
+        
         std::string s = pluginbase::tools::WideToString(symbol).c_str();
         auto symbolObj = pluginSettings.Symbols.find(s);
         if (symbolObj == pluginSettings.Symbols.end())
@@ -214,46 +209,52 @@ public:
         if (currentSessionStart <= tick.datetime && currentSessionEnd > tick.datetime)
         {
             //check start
-        if (smb->SessionStartInfo == std::nullopt)
-        {
-            //for easy and fast debug: comment time check (str 214), comment 10 min check(str 233) and uncomment the following block  
-
-            /*if (deb)
+            if (smb->SessionStartInfo == std::nullopt)
             {
-                smb->SessionEndInfo = tick;
-                deb = false;
-                MAGIC_SLEEP(SECONDS_IN_MINUTE / 3);
+                //for easy and fast debug: comment time check (str 208), comment 10 min check(str 227) and uncomment the following block  
+
+                /*if (deb)
+                {
+                    smb->SessionEndInfo = tick;
+                    deb = false;
+                    MAGIC_SLEEP(SECONDS_IN_MINUTE / 3);
+                    return;
+                }*/
+                //--------
+
+                smb->SessionStartInfo = tick;
+                //LOG_FILE() << "New START for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
+
+                if (tick.datetime <= currentSessionStart + SECONDS_IN_MINUTE * 10)
+                {
+                    std::optional<double> buyPrice = std::nullopt;
+                    std::optional<double> sellPrice = std::nullopt;
+
+                    getPricesForLockingPosition(smb, buyPrice, sellPrice);
+
+                    if (buyPrice.has_value())
+                    {
+                        double price = buyPrice.value();
+                        threadPool.push([this, price, s, tick]() {
+                            openLockPositions(price, s, IMTPosition::EnPositionAction::POSITION_BUY, tick.datetime * 1000);
+                            });
+                    }
+
+                    if (sellPrice.has_value())
+                    {
+                        double price = sellPrice.value();
+                        threadPool.push([this, price, s, tick]() {
+                            openLockPositions(price, s, IMTPosition::EnPositionAction::POSITION_SELL, tick.datetime * 1000);
+                            });
+                    }
+                }
+
                 return;
-            }*/
-            //--------
-
-            smb->SessionStartInfo = tick;
-            LOG_FILE() << "New START for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
-
-            if (tick.datetime <= currentSessionStart + SECONDS_IN_MINUTE * 10)
-            {
-                std::optional<double> buyPrice = std::nullopt;
-                std::optional<double> sellPrice = std::nullopt;
-
-                getPricesForLockingPosition(smb, buyPrice, sellPrice);
-
-                if (buyPrice != std::nullopt)
-                    threadPool.push([this, buyPrice, s, tick]() {
-                    openLockPositions(buyPrice.value(), s, IMTPosition::EnPositionAction::POSITION_BUY, tick.datetime * 1000);
-                        });
-
-                if (sellPrice != std::nullopt)
-                    threadPool.push([this, sellPrice, s, tick]() {
-                    openLockPositions(sellPrice.value(), s, IMTPosition::EnPositionAction::POSITION_SELL, tick.datetime * 1000);
-                        });           
             }
 
-            return;
-        }
-
-        //set end
-        smb->SessionEndInfo = tick;
-        LOG_FILE() << "New END for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
+            //set end
+            smb->SessionEndInfo = tick;
+            //LOG_FILE() << "New END for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;      
         }
         else
         {
@@ -323,8 +324,7 @@ private:
     void getPricesForLockingPosition(std::shared_ptr<Symbol> symbol, std::optional<double> &buyPrice, std::optional<double> &sellPrice)
     {
         METHOD_BEGIN();
-        LOCK();
-
+        
         //get symbol info for digits
         WIMTConSymbol wrapper(serverApi);
         MTAPIRES retcode;
@@ -351,7 +351,7 @@ private:
             sellPrice = askClose - symbol->Points * wrapper->Point();
         else if (askOpen > askClose && askOpen - askClose >= symbol->Points * wrapper->Point())
             sellPrice = askClose + symbol->Points * wrapper->Point();
-
+        
         return;
 
         METHOD_END();
@@ -401,15 +401,18 @@ private:
     WIMTPositionArray getPositionsBySymbolAndOperation(std::string symbol, IMTPosition::EnPositionAction action)
     {
         METHOD_BEGIN();
-        LOCK();
 
         //get open positions by groups
         WIMTPositionArray allPositions(serverApi);
         MTAPIRES retcode;
-        if ((retcode = serverApi->PositionGetByGroup(pluginbase::tools::StringToWide(pluginSettings.Groups).c_str(), allPositions)) != MT_RET_OK)
+
         {
-            LOG_ERROR() << "Cannot get open positions for group mask '" << pluginSettings.Groups << "' from server: " << retcode;
-            return allPositions;
+            LOCK(); // pluginSettings.Groups ?
+            if ((retcode = serverApi->PositionGetByGroup(pluginbase::tools::StringToWide(pluginSettings.Groups).c_str(), allPositions)) != MT_RET_OK)
+            {
+                LOG_ERROR() << "Cannot get open positions for group mask '" << pluginSettings.Groups << "' from server: " << retcode;
+                return allPositions;
+            }
         }
 
         WIMTPositionArray positions(serverApi);
@@ -428,7 +431,6 @@ private:
     WIMTOrderArray CreateOrderArray(WIMTPositionArray &positions, IMTPosition::EnPositionAction action, double price, INT64 time)
     {
         METHOD_BEGIN();
-        LOCK();
 
         int errors = 0;
 
@@ -527,94 +529,99 @@ private:
     bool CreateDealArray(WIMTOrderArray &orders)
     {
         METHOD_BEGIN();
-        LOCK();
-
-        int errors = 0;
-
-        //create deals
-        WIMTDealArray deals(serverApi);
-        while (errors <= 10)
+        try
         {
-            for (int i = 0; i < orders->Total(); i++)
-            {
-                WIMTDeal deal(serverApi);
-                deal->Login(orders->Next(i)->Login());
-                deal->Symbol(orders->Next(i)->Symbol());
-                deal->Action(orders->Next(i)->Type());
-                deal->Volume(orders->Next(i)->VolumeInitial());
-                deal->Price(orders->Next(i)->PriceOrder());
-                deal->Digits(orders->Next(i)->Digits());
-                deal->DigitsCurrency(orders->Next(i)->DigitsCurrency());
-                deal->ContractSize(orders->Next(i)->ContractSize());
-                deal->TimeMsc(orders->Next(i)->TimeSetupMsc());
-                deal->RateMargin(orders->Next(i)->RateMargin());
-                deal->Order(orders->Next(i)->Order());
-                deal->PositionID(orders->Next(i)->Order());
-                deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
-                deal->ReasonSet(orders->Next(i)->Reason());
-                deals->Add(deal);
-            }
-            if (orders->Total() != deals->Total())
-            {
-                errors++;
-                deals->Clear();
-            }
-            else
-                break;
-        }
 
-        //create orders on server
-        while (errors <= 10)
-        {
-            WIMTDealArray currArray(serverApi);
-            for (int i = 0; i < deals->Total(); i++)
-            {
-                if (deals->Next(i)->Deal() == 0)
-                    currArray->Add(deals->Next(i));
-            }
+            int errors = 0;
 
-            if (currArray == 0)
+            //create deals
+            WIMTDealArray deals(serverApi);
+            while (errors <= 10)
             {
-                LOG_ERROR() << "Smth went wrong";
-                errors++;
-                continue;
-            }
-
-            MTAPIRES* retcodes;
-            MTAPIRES retcode = serverApi->DealAddBatch(currArray, retcodes);
-
-            if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
-            {
-                //wait 1 sec and just try again
-                MAGIC_SLEEP(SECONDS_IN_MINUTE);
-                errors++;
-                continue;
-            }
-
-            if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
-            {
-                LOG_ERROR() << "Problems with creating deals. Status: " << retcode;
-                errors++;
-                continue;
-            }
-
-            bool isOK = true;
-            for (uint32_t i = 0; i < currArray->Total(); i++)
-            {
-                if (retcodes[i] == MT_RET_OK)
+                for (int i = 0; i < orders->Total(); i++)
                 {
-                    LOG_FILE() << "Deal " << currArray->Next(i)->Deal() << " with position id " << currArray->Next(i)->PositionID() << " has been created";
+                    WIMTDeal deal(serverApi);
+                    deal->Login(orders->Next(i)->Login());
+                    deal->Symbol(orders->Next(i)->Symbol());
+                    deal->Action(orders->Next(i)->Type());
+                    deal->Volume(orders->Next(i)->VolumeInitial());
+                    deal->Price(orders->Next(i)->PriceOrder());
+                    deal->Digits(orders->Next(i)->Digits());
+                    deal->DigitsCurrency(orders->Next(i)->DigitsCurrency());
+                    deal->ContractSize(orders->Next(i)->ContractSize());
+                    deal->TimeMsc(orders->Next(i)->TimeSetupMsc());
+                    deal->RateMargin(orders->Next(i)->RateMargin());
+                    deal->Order(orders->Next(i)->Order());
+                    deal->PositionID(orders->Next(i)->Order());
+                    deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
+                    deal->ReasonSet(orders->Next(i)->Reason());
+                    deals->Add(deal);
+                }
+                if (orders->Total() != deals->Total())
+                {
+                    errors++;
+                    deals->Clear();
+                }
+                else
+                    break;
+            }
+
+            //create orders on server
+            while (errors <= 10)
+            {
+                WIMTDealArray currArray(serverApi);
+                for (int i = 0; i < deals->Total(); i++)
+                {
+                    if (deals->Next(i)->Deal() == 0)
+                        currArray->Add(deals->Next(i));
+                }
+
+                if (currArray == 0)
+                {
+                    errors++;
                     continue;
                 }
-                isOK = false;
+
+                MTAPIRES* retcodes;
+                MTAPIRES retcode = serverApi->DealAddBatch(currArray, retcodes);
+
+                if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
+                {
+                    //wait 1 sec and just try again
+                    MAGIC_SLEEP(SECONDS_IN_MINUTE);
+                    errors++;
+                    continue;
+                }
+
+                if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
+                {
+                    LOG_ERROR() << "Problems with creating deals. Status: " << retcode;
+                    errors++;
+                    continue;
+                }
+
+                bool isOK = true;
+                for (uint32_t i = 0; i < currArray->Total(); i++)
+                {
+                    if (retcodes[i] == MT_RET_OK)
+                    {
+                        LOG_FILE() << "Deal " << currArray->Next(i)->Deal() << " with position id " << currArray->Next(i)->PositionID() << " has been created";
+                        continue;
+                    }
+                    isOK = false;
+                }
+
+                if (isOK)
+                    return true;
+
+                errors++;
             }
-
-            if (isOK)
-                return true;
-
-            errors++;
+            return false;
         }
-        return false;
+        catch (const std::exception & ex)
+        {
+            LOG_FILE() << std::string(ex.what());
+        }
 
         METHOD_END();
     }
@@ -622,7 +629,6 @@ private:
     bool fixPositions(WIMTOrderArray &orders)
     {
         METHOD_BEGIN();
-        LOCK();
 
         WIMTPositionArray positions(serverApi);
         for(int i = 0; i < orders->Total(); i++)
