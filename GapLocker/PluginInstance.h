@@ -201,7 +201,7 @@ public:
         auto smb = symbolObj->second;
 
         //write ticks in other file !!!
-        LOG_FILE() << "[" << tick.datetime << "] New tick for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
+        //LOG_FILE() << "[" << tick.datetime << "] New tick for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
 
         time_t currentSessionStart = smb->GetTimeWithOffset(smb->BeginTimeOffset, tick.datetime);
         time_t currentSessionEnd = smb->GetTimeWithOffset(smb->EndTimeOffset, tick.datetime);
@@ -225,7 +225,7 @@ public:
                 smb->SessionStartInfo = tick;
                 //LOG_FILE() << "New START for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
 
-                if (tick.datetime <= currentSessionStart + SECONDS_IN_MINUTE * 10)
+                if (tick.datetime <= currentSessionStart + SECONDS_IN_MINUTE * 10 && smb->SessionEndInfo != std::nullopt)
                 {
                     std::optional<double> buyPrice = std::nullopt;
                     std::optional<double> sellPrice = std::nullopt;
