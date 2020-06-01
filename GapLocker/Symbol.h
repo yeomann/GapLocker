@@ -30,6 +30,6 @@ struct Symbol
         t->tm_min = 0;
         t->tm_sec = 0;
 
-        return mktime(t) + (newDay) ? offset - SECONDS_IN_DAY : offset;
+        return mktime(t) + ((newDay) ? offset - SECONDS_IN_DAY : offset);
     }
 };
