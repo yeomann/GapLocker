@@ -420,7 +420,7 @@ private:
         {
             if (pluginbase::tools::WideToString(allPositions->Next(i)->Symbol()) == symbol
                 && allPositions->Next(i)->Action() == action)
-                positions->Add(allPositions->Next(i));
+                positions->AddCopy(allPositions->Next(i));
         }
 
         return positions;
@@ -435,6 +435,7 @@ private:
         int errors = 0;
 
         //create orders array
+        WIMTOrderArray currArray(serverApi);
         WIMTOrderArray orders(serverApi);
         while (errors <= 10)
         {
@@ -459,12 +460,12 @@ private:
                 order->TimeDoneMsc(time);
                 order->ReasonSet(IMTOrder::EnOrderReason::ORDER_REASON_DEALER);
                 order->StateSet(IMTOrder::EnOrderState::ORDER_STATE_FILLED);
-                orders->Add(order);
+                currArray->Add(order);
             }
-            if (orders->Total() != positions->Total())
+            if (currArray->Total() != positions->Total())
             {
                 errors++;
-                orders->Clear();
+                currArray->Clear();
             }
             else
                 break;
@@ -473,19 +474,6 @@ private:
         //create orders on server
         while (errors <= 10) 
         {
-            WIMTOrderArray currArray(serverApi);
-            for (int i = 0; i < orders->Total(); i++)
-            {
-                if (orders->Next(i)->Order() == 0)
-                    currArray->Add(orders->Next(i));
-            }
-
-            if (currArray == 0)
-            {
-                errors++;
-                continue;
-            }
-
             MTAPIRES* retcodes;  
             MTAPIRES retcode = serverApi->HistoryAddBatch(currArray, retcodes);
 
@@ -505,11 +493,14 @@ private:
             }
 
             bool isOK = true;
-            for (uint32_t i = 0; i < currArray->Total(); i++)
+            for (int i = currArray->Total() - 1; i >= 0; --i)
             {
-                if (retcodes[i] == MT_RET_OK) 
+                LOG_FILE() << currArray->Next(i)->Order();
+                if (retcodes[i] == MT_RET_OK && currArray->Next(i)->Order() != 0)
                 {
                     LOG_FILE() << "Order " << currArray->Next(i)->Order() << " has been created";
+                    orders->AddCopy(currArray->Next(i));
+                    currArray->Delete(i);
                     continue;
                 }
                 isOK = false;
@@ -529,99 +520,86 @@ private:
     bool CreateDealArray(WIMTOrderArray &orders)
     {
         METHOD_BEGIN();
-        try
+        int errors = 0;
+
+        //create deals
+        WIMTDealArray deals(serverApi);
+        WIMTDealArray currArray(serverApi);
+        while (errors <= 10)
         {
-
-            int errors = 0;
-
-            //create deals
-            WIMTDealArray deals(serverApi);
-            while (errors <= 10)
+            for (int i = 0; i < orders->Total(); i++)
             {
-                for (int i = 0; i < orders->Total(); i++)
-                {
-                    WIMTDeal deal(serverApi);
-                    deal->Login(orders->Next(i)->Login());
-                    deal->Symbol(orders->Next(i)->Symbol());
-                    deal->Action(orders->Next(i)->Type());
-                    deal->Volume(orders->Next(i)->VolumeInitial());
-                    deal->Price(orders->Next(i)->PriceOrder());
-                    deal->Digits(orders->Next(i)->Digits());
-                    deal->DigitsCurrency(orders->Next(i)->DigitsCurrency());
-                    deal->ContractSize(orders->Next(i)->ContractSize());
-                    deal->TimeMsc(orders->Next(i)->TimeSetupMsc());
-                    deal->RateMargin(orders->Next(i)->RateMargin());
-                    deal->Order(orders->Next(i)->Order());
-                    deal->PositionID(orders->Next(i)->Order());
-                    deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
-                    deal->ReasonSet(orders->Next(i)->Reason());
-                    deals->Add(deal);
-                }
-                if (orders->Total() != deals->Total())
-                {
-                    errors++;
-                    deals->Clear();
-                }
-                else
-                    break;
+                LOG_FILE() << "LOGIN " << orders->Next(i)->Login();
+                LOG_FILE() << "ORDER " << orders->Next(i)->Order();
+
+                WIMTDeal deal(serverApi);
+                deal->Login(orders->Next(i)->Login());
+                deal->Symbol(orders->Next(i)->Symbol());
+                deal->Action(orders->Next(i)->Type());
+                deal->Volume(orders->Next(i)->VolumeInitial());
+                deal->Price(orders->Next(i)->PriceOrder());
+                deal->Digits(orders->Next(i)->Digits());
+                deal->DigitsCurrency(orders->Next(i)->DigitsCurrency());
+                deal->ContractSize(orders->Next(i)->ContractSize());
+                deal->TimeMsc(orders->Next(i)->TimeSetupMsc());
+                deal->RateMargin(orders->Next(i)->RateMargin());
+                deal->Order(orders->Next(i)->Order());
+                deal->PositionID(orders->Next(i)->Order());
+                deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
+                deal->ReasonSet(orders->Next(i)->Reason());
+                currArray->Add(deal);
             }
-
-            //create orders on server
-            while (errors <= 10)
+            if (orders->Total() != currArray->Total())
             {
-                WIMTDealArray currArray(serverApi);
-                for (int i = 0; i < deals->Total(); i++)
-                {
-                    if (deals->Next(i)->Deal() == 0)
-                        currArray->Add(deals->Next(i));
-                }
-
-                if (currArray == 0)
-                {
-                    errors++;
-                    continue;
-                }
-
-                MTAPIRES* retcodes;
-                MTAPIRES retcode = serverApi->DealAddBatch(currArray, retcodes);
-
-                if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
-                {
-                    //wait 1 sec and just try again
-                    MAGIC_SLEEP(SECONDS_IN_MINUTE);
-                    errors++;
-                    continue;
-                }
-
-                if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
-                {
-                    LOG_ERROR() << "Problems with creating deals. Status: " << retcode;
-                    errors++;
-                    continue;
-                }
-
-                bool isOK = true;
-                for (uint32_t i = 0; i < currArray->Total(); i++)
-                {
-                    if (retcodes[i] == MT_RET_OK)
-                    {
-                        LOG_FILE() << "Deal " << currArray->Next(i)->Deal() << " with position id " << currArray->Next(i)->PositionID() << " has been created";
-                        continue;
-                    }
-                    isOK = false;
-                }
-
-                if (isOK)
-                    return true;
-
                 errors++;
+                currArray->Clear();
             }
-            return false;
+            else
+                break;
         }
-        catch (const std::exception & ex)
+
+        //create orders on server
+        while (errors <= 10)
         {
-            LOG_FILE() << std::string(ex.what());
+            MTAPIRES* retcodes;
+            MTAPIRES retcode = serverApi->DealAddBatch(currArray, retcodes);
+
+            if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
+            {
+                //wait 1 sec and just try again
+                MAGIC_SLEEP(SECONDS_IN_MINUTE);
+                errors++;
+                continue;
+            }
+
+            if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
+            {
+                LOG_ERROR() << "Problems with creating deals. Status: " << retcode;
+                errors++;
+                continue;
+            }
+
+            bool isOK = true;
+            for (int i = currArray->Total() - 1; i >= 0; --i)
+            {
+                LOG_FILE() << currArray->Next(i)->Deal();
+                if (retcodes[i] == MT_RET_OK && currArray->Next(i)->Deal() != 0)
+                {
+                    LOG_FILE() << "Deal " << currArray->Next(i)->Deal() << " with position id " << currArray->Next(i)->PositionID() << " has been created";
+                    deals->AddCopy(currArray->Next(i));
+                    currArray->Delete(i);
+                    continue;
+                }
+                isOK = false;
+            }
+
+            if (isOK)
+                return true;
+
+            errors++;
         }
+
+        return false;
 
         METHOD_END();
     }
