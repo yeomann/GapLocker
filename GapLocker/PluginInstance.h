@@ -390,16 +390,23 @@ private:
         METHOD_BEGIN();
 
         //get open positions by groups
+        WIMTPositionArray allPositions(serverApi);
         WIMTPositionArray positions(serverApi);
         MTAPIRES retcode;
 
         {
             LOCK();
-            if ((retcode = serverApi->PositionGetByGroup(pluginbase::tools::StringToWide(pluginSettings.Groups).c_str(), positions)) != MT_RET_OK)
+            if ((retcode = serverApi->PositionGetByGroup(pluginbase::tools::StringToWide(pluginSettings.Groups).c_str(), allPositions)) != MT_RET_OK)
             {
                 LOG_ERROR() << "Cannot get open positions for group mask '" << pluginSettings.Groups << "' from server: " << retcode;
-                positions->Clear();
+                return positions;
             }
+        }
+
+        for (uint32_t i = 0; i < allPositions->Total(); i++)
+        {
+            if (pluginbase::tools::WideToString(allPositions->Next(i)->Symbol()) == symbol)
+                positions->AddCopy(allPositions->Next(i));
         }
       
         return positions;
