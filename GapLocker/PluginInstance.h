@@ -437,11 +437,12 @@ private:
         //create orders array
         WIMTOrderArray currArray(serverApi);
         WIMTOrderArray orders(serverApi);
+        WIMTOrder order(serverApi);
+
         while (errors <= 10)
         {
             for (int i = 0; i < positions->Total(); i++)
             {
-                WIMTOrder order(serverApi);
                 order->Login(positions->Next(i)->Login());
                 order->Symbol(positions->Next(i)->Symbol());
                 order->Type(action);
@@ -460,7 +461,7 @@ private:
                 order->TimeDoneMsc(time);
                 order->ReasonSet(IMTOrder::EnOrderReason::ORDER_REASON_DEALER);
                 order->StateSet(IMTOrder::EnOrderState::ORDER_STATE_FILLED);
-                currArray->Add(order);
+                currArray->AddCopy(order);
             }
             if (currArray->Total() != positions->Total())
             {
@@ -470,6 +471,8 @@ private:
             else
                 break;
         }  
+
+        errors = 0;
 
         //create orders on server
         while (errors <= 10) 
@@ -499,15 +502,17 @@ private:
                 if (retcodes[i] == MT_RET_OK && currArray->Next(i)->Order() != 0)
                 {
                     LOG_FILE() << "Order " << currArray->Next(i)->Order() << " has been created";
-                    orders->AddCopy(currArray->Next(i));
-                    currArray->Delete(i);
+                    orders->Add(currArray->Detach(i)); // move order to success array
                     continue;
                 }
                 isOK = false;
             }
 
             if (isOK)
+            {
                 return orders;
+            }
+
             errors++;
         }
 
@@ -523,16 +528,13 @@ private:
         int errors = 0;
 
         //create deals
-        WIMTDealArray deals(serverApi);
         WIMTDealArray currArray(serverApi);
+        WIMTDeal deal(serverApi);
+
         while (errors <= 10)
         {
             for (int i = 0; i < orders->Total(); i++)
             {
-                LOG_FILE() << "LOGIN " << orders->Next(i)->Login();
-                LOG_FILE() << "ORDER " << orders->Next(i)->Order();
-
-                WIMTDeal deal(serverApi);
                 deal->Login(orders->Next(i)->Login());
                 deal->Symbol(orders->Next(i)->Symbol());
                 deal->Action(orders->Next(i)->Type());
@@ -547,7 +549,7 @@ private:
                 deal->PositionID(orders->Next(i)->Order());
                 deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
                 deal->ReasonSet(orders->Next(i)->Reason());
-                currArray->Add(deal);
+                currArray->AddCopy(deal);
             }
             if (orders->Total() != currArray->Total())
             {
@@ -557,6 +559,8 @@ private:
             else
                 break;
         }
+
+        errors = 0;
 
         //create orders on server
         while (errors <= 10)
@@ -586,7 +590,6 @@ private:
                 if (retcodes[i] == MT_RET_OK && currArray->Next(i)->Deal() != 0)
                 {
                     LOG_FILE() << "Deal " << currArray->Next(i)->Deal() << " with position id " << currArray->Next(i)->PositionID() << " has been created";
-                    deals->AddCopy(currArray->Next(i));
                     currArray->Delete(i);
                     continue;
                 }
@@ -594,7 +597,9 @@ private:
             }
 
             if (isOK)
+            {
                 return true;
+            }
 
             errors++;
         }
