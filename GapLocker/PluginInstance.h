@@ -211,8 +211,7 @@ public:
             //check start
             if (smb->SessionStartInfo == std::nullopt)
             {
-                //for easy and fast debug: comment time check (str 208), comment 10 min check(str 227) and uncomment the following block  
-
+                //for easy and fast debug: comment time check (str 209), comment 10 min check(str 227) and uncomment the following block  
                 /*if (deb)
                 {
                     smb->SessionEndInfo = tick;
@@ -353,25 +352,21 @@ private:
         METHOD_BEGIN();
 
         auto positions = getPositionsBySymbolAndOperation(symbol);
-        if (positions->Total() == 0)
+        if (positions.size() == 0)
         {
             return;
         }
 
         //create orders
         auto orders = CreateOrderArray(positions, buyPrice, sellPrice, time);
-        if (orders->Total() == 0)
+        if (orders.size() == 0)
         {
             LOG_ERROR() << "Can't create order array for symbol '" << symbol << "'. Skip.";
             return;
         }
 
         //create deals
-        if (!CreateDealArray(orders))
-        {
-            LOG_ERROR() << "Can't create deal array for symbol '" << symbol << "'. Skip.";
-            return;
-        }
+        CreateDealArray(orders);
 
         //fix positions
         if (!fixPositions(orders))
@@ -385,13 +380,13 @@ private:
         METHOD_END();
     }
 
-    WIMTPositionArray getPositionsBySymbolAndOperation(std::string symbol)
+    std::vector<IMTPosition*> getPositionsBySymbolAndOperation(const std::string& symbol)
     {
         METHOD_BEGIN();
 
         //get open positions by groups
         WIMTPositionArray allPositions(serverApi);
-        WIMTPositionArray positions(serverApi);
+        std::vector<IMTPosition*> positions;
         MTAPIRES retcode;
 
         {
@@ -403,10 +398,14 @@ private:
             }
         }
 
-        for (uint32_t i = 0; i < allPositions->Total(); i++)
+        LOG_FILE() << "Positions detected: " << allPositions->Total();
+
+        for (int i = allPositions->Total() - 1; i >= 0; --i)
         {
-            if (pluginbase::tools::WideToString(allPositions->Next(i)->Symbol()) == symbol)
-                positions->AddCopy(allPositions->Next(i));
+            if (pluginbase::tools::WideToString(allPositions->Next(i)->Symbol()) == symbol) 
+            {
+                positions.push_back(allPositions->Detach(i));
+            }
         }
       
         return positions;
@@ -414,222 +413,154 @@ private:
         METHOD_END();
     }
 
-    WIMTOrderArray CreateOrderArray(WIMTPositionArray &positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time)
+    const std::vector<IMTOrder*> CreateOrderArray(const std::vector<IMTPosition*> positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time)
     {
         METHOD_BEGIN();
 
-        int errors = 0;
-
         //create orders array
-        WIMTOrderArray currArray(serverApi);
-        WIMTOrderArray orders(serverApi);
-        WIMTOrder order(serverApi);
-
-        int positionCount = 0;
+        WIMTOrderArray ordersArray(serverApi); //?
+        std::vector<IMTOrder*> orders;
         UINT action;
         double price;
 
-        while (errors <= 10)
+        for (auto position : positions)
         {
-            for (int i = 0; i < positions->Total(); i++)
+            if (position->Action() == 0 && sellPrice.has_value())
             {
-                if (positions->Next(i)->Action() == IMTPosition::EnPositionAction::POSITION_BUY && sellPrice.has_value()) 
-                {
-                    action = IMTPosition::EnPositionAction::POSITION_SELL;
-                    price = sellPrice.value();
-                }
-                else if (positions->Next(i)->Action() == IMTPosition::EnPositionAction::POSITION_SELL && buyPrice.has_value())
-                {
-                    action = IMTPosition::EnPositionAction::POSITION_BUY;
-                    price = buyPrice.value();
-                }
-                else 
-                {
-                    continue;
-                }
-
-                positionCount++;
-                LOG_FILE() << "Starting creation of locking position for position " << positions->Next(i)->Position();
-
-                order->Login(positions->Next(i)->Login());
-                order->Symbol(positions->Next(i)->Symbol());
-                order->Type(action);
-                order->Digits(positions->Next(i)->Digits());
-                order->DigitsCurrency(positions->Next(i)->DigitsCurrency());
-                order->ContractSize(positions->Next(i)->ContractSize());
-                order->VolumeInitial(positions->Next(i)->Volume());
-                order->VolumeCurrent(0);
-                order->PriceOrder(price);
-                order->PriceCurrent(price);
-                order->PriceSL(0);
-                order->PriceTP(0);
-                order->RateMargin(positions->Next(i)->RateMargin());
-                order->TypeFill(IMTOrder::EnOrderFilling::ORDER_FILL_RETURN);
-                order->TimeSetupMsc(time);
-                order->TimeDoneMsc(time);
-                order->ReasonSet(IMTOrder::EnOrderReason::ORDER_REASON_DEALER);
-                order->StateSet(IMTOrder::EnOrderState::ORDER_STATE_FILLED);
-                currArray->AddCopy(order);
+                action = 1;
+                price = sellPrice.value();
             }
-            if (currArray->Total() != positionCount)
+            else if (position->Action() == 1 && buyPrice.has_value())
             {
-                LOG_ERROR() << "Problems with creating orders. Try again";
-                errors++;
-                currArray->Clear();
-                positionCount = 0;
+                action = 0;
+                price = buyPrice.value();
             }
             else
-                break;
-        }  
-
-        errors = 0;
-
-        //create orders on server
-        while (errors <= 10) 
-        {
-            MTAPIRES* retcodes;  
-            MTAPIRES retcode = serverApi->HistoryAddBatch(currArray, retcodes);
-
-            if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
             {
-                //wait 1 sec and just try again
-                MAGIC_SLEEP(SECONDS_IN_MINUTE);
-                errors++;
                 continue;
             }
 
-            if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
+            WIMTOrder order(serverApi);
+            order->Login(position->Login());
+            order->Symbol(position->Symbol());
+            order->Type(action);
+            order->Digits(position->Digits());
+            order->DigitsCurrency(position->DigitsCurrency());
+            order->ContractSize(position->ContractSize());
+            order->VolumeInitial(position->Volume());
+            order->VolumeCurrent(0);
+            order->PriceOrder(price);
+            order->PriceCurrent(price);
+            order->PriceSL(0);
+            order->PriceTP(0);
+            order->RateMargin(position->RateMargin());
+            order->TypeFill(IMTOrder::EnOrderFilling::ORDER_FILL_RETURN);
+            order->TimeSetupMsc(time);
+            order->TimeDoneMsc(time);
+            order->ReasonSet(IMTOrder::EnOrderReason::ORDER_REASON_DEALER);
+            order->StateSet(IMTOrder::EnOrderState::ORDER_STATE_FILLED);
+            
+            //try to create on server
+            int errors = 0;
+            while (errors <= 10)
             {
-                LOG_ERROR() << "Problems with creating orders. Status: " << retcode;
-                errors++;
-                continue;
-            }
-
-            bool isOK = true;
-            for (int i = currArray->Total() - 1; i >= 0; --i)
-            {
-                if (retcodes[i] == MT_RET_OK && currArray->Next(i)->Order() != 0)
+                MTAPIRES retcode = serverApi->HistoryAdd(order);
+                if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
                 {
-                    LOG_FILE() << "Order " << currArray->Next(i)->Order() << " has been created";
-                    orders->AddCopy(currArray->Next(i));
-                    currArray->Delete(i);
+                    //wait 1 sec and just try again
+                    MAGIC_SLEEP(SECONDS_IN_MINUTE);
+                    errors++;
                     continue;
                 }
-                isOK = false;
+
+                if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
+                {
+                    LOG_ERROR() << "Problems with creating orders. Status: " << retcode;
+                    errors++;
+                    continue;
+                }
+
+                LOG_FILE() << "Locking order " << order->Order() << " for position " << position->Position() << " has been created";
+                ordersArray->AddCopy(order);
+                break;
             }
 
-            if (isOK)
-            {
-                return orders;
-            }
-
-            errors++;
+            if (errors > 10)
+                LOG_ERROR() << "Can't create lock order for position " << position->Position() << ". Skip creating locking position";
         }
 
-        orders->Clear();
+        for (int i = ordersArray->Total() - 1; i >= 0; --i)
+        {
+            orders.push_back(ordersArray->Detach(i));
+        }
         return orders;
 
         METHOD_END();
     }
 
-    bool CreateDealArray(WIMTOrderArray &orders)
+    const void CreateDealArray(const std::vector<IMTOrder*> orders)
     {
         METHOD_BEGIN();
-        int errors = 0;
-
-        LOG_FILE() << "DEALS"; //WHY DEALS ARE NOT CREATED WITHOUT THIS MSG?
 
         //create deals
-        WIMTDealArray currArray(serverApi);
-        WIMTDeal deal(serverApi);
-
-        while (errors <= 10)
+        for (auto order : orders)
         {
-            for (int i = 0; i < orders->Total(); i++)
-            {
-                deal->Login(orders->Next(i)->Login());
-                deal->Symbol(orders->Next(i)->Symbol());
-                deal->Action(orders->Next(i)->Type());
-                deal->Volume(orders->Next(i)->VolumeInitial());
-                deal->Price(orders->Next(i)->PriceOrder());
-                deal->Digits(orders->Next(i)->Digits());
-                deal->DigitsCurrency(orders->Next(i)->DigitsCurrency());
-                deal->ContractSize(orders->Next(i)->ContractSize());
-                deal->TimeMsc(orders->Next(i)->TimeSetupMsc());
-                deal->RateMargin(orders->Next(i)->RateMargin());
-                deal->Order(orders->Next(i)->Order());
-                deal->PositionID(orders->Next(i)->Order());
-                deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
-                deal->ReasonSet(orders->Next(i)->Reason());
-                currArray->AddCopy(deal);
-            }
-            if (orders->Total() != currArray->Total())
-            {
-                LOG_ERROR() << "Problems with creating orders. Try again";
-                errors++;
-                currArray->Clear();
-            }
-            else
-                break;
-        }
+            WIMTDeal deal(serverApi);
+            deal->Login(order->Login());
+            deal->Symbol(order->Symbol());
+            deal->Action(order->Type());
+            deal->Volume(order->VolumeInitial());
+            deal->Price(order->PriceOrder());
+            deal->Digits(order->Digits());
+            deal->DigitsCurrency(order->DigitsCurrency());
+            deal->ContractSize(order->ContractSize());
+            deal->TimeMsc(order->TimeSetupMsc());
+            deal->RateMargin(order->RateMargin());
+            deal->Order(order->Order());
+            deal->PositionID(order->Order());
+            deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
+            deal->ReasonSet(order->Reason());
 
-        errors = 0;
-
-        //create orders on server
-        while (errors <= 10)
-        {
-            MTAPIRES* retcodes;
-            MTAPIRES retcode = serverApi->DealAddBatch(currArray, retcodes);
-
-            if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
+            //try to create on server
+            int errors = 0;
+            while (errors <= 10)
             {
-                //wait 1 sec and just try again
-                MAGIC_SLEEP(SECONDS_IN_MINUTE);
-                errors++;
-                continue;
-            }
-
-            if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
-            {
-                LOG_ERROR() << "Problems with creating deals. Status: " << retcode;
-                errors++;
-                continue;
-            }
-
-            bool isOK = true;
-            for (int i = currArray->Total() - 1; i >= 0; --i)
-            {
-                if (retcodes[i] == MT_RET_OK && currArray->Next(i)->Deal() != 0)
+                MTAPIRES retcode = serverApi->DealAdd(deal);
+                if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
                 {
-                    LOG_FILE() << "Deal " << currArray->Next(i)->Deal() << " with position id " << currArray->Next(i)->PositionID() << " has been created";
-                    currArray->Delete(i);
+                    //wait 1 sec and just try again
+                    MAGIC_SLEEP(SECONDS_IN_MINUTE);
+                    errors++;
                     continue;
                 }
-                isOK = false;
+
+                if (retcode != MT_RET_OK && retcode != MT_RET_OK_NONE)
+                {
+                    LOG_ERROR() << "Problems with creating deals. Status: " << retcode;
+                    errors++;
+                    continue;
+                }
+
+                LOG_FILE() << "Deal " << deal->Deal() << " with position id " << deal->PositionID() << " has been created";
+                break;
             }
 
-            if (isOK)
-            {
-                return true;
-            }
-
-            errors++;
+            if (errors > 10)
+                LOG_ERROR() << "Can't create lock deal for order and position " << order->Order() << ". Skip.";
         }
-
-        return false;
 
         METHOD_END();
     }
 
-    bool fixPositions(WIMTOrderArray &orders)
+    bool fixPositions(const std::vector<IMTOrder*> orders)
     {
         METHOD_BEGIN();
 
         WIMTPositionArray positions(serverApi);
 
         std::vector<UINT64> logins;
-        for (int i = 0; i < orders->Total(); i++)
-            logins.push_back(orders->Next(i)->Login());
+        for (auto order : orders)
+            logins.push_back(order->Login());
         logins.erase(unique(logins.begin(), logins.end()), logins.end());
 
         for (auto login : logins)
