@@ -150,12 +150,9 @@ public:
             return (retcode);
         }
         
+        if (LOCK(); !SettingsReader::Read(serverApi, pluginSettings))
         {
-            LOCK();
-            if (!SettingsReader::Read(serverApi, pluginSettings))
-            {
-                return (MT_RET_ERR_PARAMS);
-            }
+            return (MT_RET_ERR_PARAMS);
         }
 
         LOG_FILE() << "Thread-loop starting...";
@@ -180,11 +177,9 @@ public:
         {
             return;
         }
-
-        {
-            LOCK();
-            SettingsReader::Read(serverApi, pluginSettings);
-        }
+            
+        LOCK();
+        SettingsReader::Read(serverApi, pluginSettings);
 
         SAFE_END();
     }
@@ -204,9 +199,6 @@ public:
 
         auto smb = symbolObj->second;
 
-        //write ticks in other file !!!
-        //LOG_FILE() << "[" << tick.datetime << "] New tick for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;
-
         time_t currentSessionStart = smb->GetTimeWithOffset(smb->BeginTimeOffset, tick.datetime);
         time_t currentSessionEnd = smb->GetTimeWithOffset(smb->EndTimeOffset, tick.datetime);
 
@@ -215,7 +207,7 @@ public:
             //check start
             if (smb->SessionStartInfo == std::nullopt)
             {
-                //for easy and fast debug: comment time check (str 209), comment 10 min check(str 227) and uncomment the following block  
+                //for debug uncomment the following block  
                 /*if (deb)
                 {
                     smb->SessionEndInfo = tick;
@@ -223,7 +215,6 @@ public:
                     MAGIC_SLEEP(SECONDS_IN_MINUTE / 3);
                     return;
                 }*/
-                //--------
 
                 smb->SessionStartInfo = tick;
                 LOG_FILE() << "Session Started";
@@ -247,12 +238,10 @@ public:
             }
 
             //set end
-            smb->SessionEndInfo = tick;
-            //LOG_FILE() << "New END for '" << s << "': Bid = " << tick.bid << ", Ask = " << tick.ask;      
+            smb->SessionEndInfo = tick; 
         }
         else
         {
-            //set start to null - we don't need it anymore
             if (smb->SessionStartInfo != std::nullopt)
             {
                 smb->SessionStartInfo = std::nullopt;
