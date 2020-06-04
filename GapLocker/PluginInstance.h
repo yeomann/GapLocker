@@ -33,7 +33,7 @@ private:
 
     bool deb = true;
 
-    enum { LOOP_DELAY_IN_MILLISECONDS = 50, TIMEOUT_CHECK_STATE = 50 };
+    enum { LOOP_DELAY_IN_MILLISECONDS = 50, TIMEOUT_CHECK_STATE = 50, MILLISECONDS_IN_SEC = 1000 };
 
     MUTEX();
 
@@ -172,7 +172,7 @@ public:
 
     void OnPluginUpdate(const IMTConPlugin* plugin)
     {
-        METHOD_BEGIN();
+        SAFE_BEGIN();
 
         if (serverApi == nullptr)
         {
@@ -182,7 +182,7 @@ public:
         SettingsReader::Read(serverApi, pluginSettings);
         //SettingsReader::Print(userSettings);
 
-        METHOD_END();
+        SAFE_END();
     }
 
     void OnTick(
@@ -328,7 +328,7 @@ private:
         double bidOpen = symbol->SessionStartInfo->bid;
         double bidClose = symbol->SessionEndInfo->bid;
 
-        auto threshold = symbol->Points * wrapper->Point();
+        const auto threshold = symbol->Points * wrapper->Point();
         if (std::abs(bidClose - bidOpen) >= threshold)
         {
             buyPrice = bidClose > bidOpen ? bidClose - threshold : bidClose + threshold;
@@ -338,7 +338,6 @@ private:
         double askOpen = symbol->SessionStartInfo->ask;
         double askClose = symbol->SessionEndInfo->ask;
 
-        threshold = symbol->Points * wrapper->Point();
         if (std::abs(askClose - askOpen) >= threshold)
         {
             sellPrice = askClose > askOpen ? askClose - threshold : askClose + threshold;
@@ -353,7 +352,7 @@ private:
     {
         METHOD_BEGIN();
 
-        auto positions = getPositionsBySymbolAndOperation(symbol);
+        auto positions = getPositionsBySymbol(symbol);
         if (positions.size() == 0)
         {
             return;
@@ -382,7 +381,7 @@ private:
         METHOD_END();
     }
 
-    std::vector<WIMTPosition> getPositionsBySymbolAndOperation(const std::string& symbol) const
+    std::vector<WIMTPosition> getPositionsBySymbol(const std::string& symbol) const
     {
         METHOD_BEGIN();
 
@@ -402,7 +401,7 @@ private:
 
         LOG_FILE() << "Positions detected: " << allPositions->Total();
 
-        for (int i = allPositions->Total() - 1; i >= 0; --i)
+        for (int i = 0; i < allPositions->Total(); i++)
         {
             if (pluginbase::tools::WideToString(allPositions->Next(i)->Symbol()) == symbol) 
             {
@@ -422,19 +421,19 @@ private:
 
         //create orders array
         std::vector<WIMTOrder> orders;
-        UINT action;
+        IMTOrder::EnOrderType action;
         double price;
 
         for (const auto& position : positions)
         {
-            if (position->Action() == 0 && sellPrice.has_value())
+            if (position->Action() == IMTPosition::EnPositionAction::POSITION_BUY && sellPrice.has_value())
             {
-                action = 1;
+                action = IMTOrder::EnOrderType::OP_SELL;
                 price = sellPrice.value();
             }
-            else if (position->Action() == 1 && buyPrice.has_value())
+            else if (position->Action() == IMTPosition::EnPositionAction::POSITION_SELL && buyPrice.has_value())
             {
-                action = 0;
+                action = IMTOrder::EnOrderType::OP_BUY;
                 price = buyPrice.value();
             }
             else
@@ -470,7 +469,7 @@ private:
                 if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
                 {
                     //wait 1 sec and just try again
-                    MAGIC_SLEEP(SECONDS_IN_MINUTE);
+                    MAGIC_SLEEP(MILLISECONDS_IN_SEC);
                     errors++;
                     continue;
                 }
@@ -528,7 +527,7 @@ private:
                 if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
                 {
                     //wait 1 sec and just try again
-                    MAGIC_SLEEP(SECONDS_IN_MINUTE);
+                    MAGIC_SLEEP(MILLISECONDS_IN_SEC);
                     errors++;
                     continue;
                 }
@@ -557,10 +556,9 @@ private:
 
         WIMTPositionArray positions(serverApi);
 
-        std::vector<UINT64> logins;
+        std::set<UINT64> logins;
         for (const auto& order : orders)
-            logins.push_back(order->Login());
-        logins.erase(unique(logins.begin(), logins.end()), logins.end());
+            logins.insert(order->Login());
 
         for (auto login : logins)
         {
