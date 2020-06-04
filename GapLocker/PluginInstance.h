@@ -358,7 +358,7 @@ private:
         }
 
         //create orders
-        auto orders = CreateOrderArray(positions, buyPrice, sellPrice, time);
+        auto orders = CreateOrderArray(&positions, buyPrice, sellPrice, time);
         if (orders.size() == 0)
         {
             LOG_ERROR() << "Can't create order array for symbol '" << symbol << "'. Skip.";
@@ -366,10 +366,10 @@ private:
         }
 
         //create deals
-        CreateDealArray(orders);
+        CreateDealArray(&orders);
 
         //fix positions
-        if (!fixPositions(orders))
+        if (!fixPositions(&orders))
         {
             LOG_ERROR() << "Can't fix positions for symbol '" << symbol << "'. Skip.";
             return;
@@ -380,13 +380,13 @@ private:
         METHOD_END();
     }
 
-    std::vector<IMTPosition*> getPositionsBySymbolAndOperation(const std::string& symbol)
+    std::vector<WIMTPosition> getPositionsBySymbolAndOperation(const std::string& symbol)
     {
         METHOD_BEGIN();
 
         //get open positions by groups
         WIMTPositionArray allPositions(serverApi);
-        std::vector<IMTPosition*> positions;
+        std::vector<WIMTPosition> positions;
         MTAPIRES retcode;
 
         {
@@ -404,7 +404,8 @@ private:
         {
             if (pluginbase::tools::WideToString(allPositions->Next(i)->Symbol()) == symbol) 
             {
-                positions.push_back(allPositions->Detach(i));
+                positions.emplace_back(serverApi);
+                positions.back()->Assign(allPositions->Next(i));
             }
         }
       
@@ -413,24 +414,23 @@ private:
         METHOD_END();
     }
 
-    const std::vector<IMTOrder*> CreateOrderArray(const std::vector<IMTPosition*> positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time)
+    const std::vector<WIMTOrder> CreateOrderArray(const std::vector<WIMTPosition>* positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time)
     {
         METHOD_BEGIN();
 
         //create orders array
-        WIMTOrderArray ordersArray(serverApi); //?
-        std::vector<IMTOrder*> orders;
+        std::vector<WIMTOrder> orders;
         UINT action;
         double price;
 
-        for (auto position : positions)
+        for (int i = 0; i < positions->size(); i++)
         {
-            if (position->Action() == 0 && sellPrice.has_value())
+            if (positions->at(i)->Action() == 0 && sellPrice.has_value())
             {
                 action = 1;
                 price = sellPrice.value();
             }
-            else if (position->Action() == 1 && buyPrice.has_value())
+            else if (positions->at(i)->Action() == 1 && buyPrice.has_value())
             {
                 action = 0;
                 price = buyPrice.value();
@@ -441,19 +441,19 @@ private:
             }
 
             WIMTOrder order(serverApi);
-            order->Login(position->Login());
-            order->Symbol(position->Symbol());
+            order->Login(positions->at(i)->Login());
+            order->Symbol(positions->at(i)->Symbol());
             order->Type(action);
-            order->Digits(position->Digits());
-            order->DigitsCurrency(position->DigitsCurrency());
-            order->ContractSize(position->ContractSize());
-            order->VolumeInitial(position->Volume());
+            order->Digits(positions->at(i)->Digits());
+            order->DigitsCurrency(positions->at(i)->DigitsCurrency());
+            order->ContractSize(positions->at(i)->ContractSize());
+            order->VolumeInitial(positions->at(i)->Volume());
             order->VolumeCurrent(0);
             order->PriceOrder(price);
             order->PriceCurrent(price);
             order->PriceSL(0);
             order->PriceTP(0);
-            order->RateMargin(position->RateMargin());
+            order->RateMargin(positions->at(i)->RateMargin());
             order->TypeFill(IMTOrder::EnOrderFilling::ORDER_FILL_RETURN);
             order->TimeSetupMsc(time);
             order->TimeDoneMsc(time);
@@ -480,46 +480,44 @@ private:
                     continue;
                 }
 
-                LOG_FILE() << "Locking order " << order->Order() << " for position " << position->Position() << " has been created";
-                ordersArray->AddCopy(order);
+                LOG_FILE() << "Locking order " << order->Order() << " for position " << positions->at(i)->Position() << " has been created";
+                
+                orders.emplace_back(serverApi);
+                orders.back()->Assign(order);
                 break;
             }
 
             if (errors > 10)
-                LOG_ERROR() << "Can't create lock order for position " << position->Position() << ". Skip creating locking position";
+                LOG_ERROR() << "Can't create lock order for position " << positions->at(i)->Position() << ". Skip creating locking position";
         }
 
-        for (int i = ordersArray->Total() - 1; i >= 0; --i)
-        {
-            orders.push_back(ordersArray->Detach(i));
-        }
         return orders;
 
         METHOD_END();
     }
 
-    const void CreateDealArray(const std::vector<IMTOrder*> orders)
+    const void CreateDealArray(const std::vector<WIMTOrder>* orders)
     {
         METHOD_BEGIN();
 
         //create deals
-        for (auto order : orders)
+        for (int i = 0; i < orders->size(); i++)
         {
             WIMTDeal deal(serverApi);
-            deal->Login(order->Login());
-            deal->Symbol(order->Symbol());
-            deal->Action(order->Type());
-            deal->Volume(order->VolumeInitial());
-            deal->Price(order->PriceOrder());
-            deal->Digits(order->Digits());
-            deal->DigitsCurrency(order->DigitsCurrency());
-            deal->ContractSize(order->ContractSize());
-            deal->TimeMsc(order->TimeSetupMsc());
-            deal->RateMargin(order->RateMargin());
-            deal->Order(order->Order());
-            deal->PositionID(order->Order());
+            deal->Login(orders->at(i)->Login());
+            deal->Symbol(orders->at(i)->Symbol());
+            deal->Action(orders->at(i)->Type());
+            deal->Volume(orders->at(i)->VolumeInitial());
+            deal->Price(orders->at(i)->PriceOrder());
+            deal->Digits(orders->at(i)->Digits());
+            deal->DigitsCurrency(orders->at(i)->DigitsCurrency());
+            deal->ContractSize(orders->at(i)->ContractSize());
+            deal->TimeMsc(orders->at(i)->TimeSetupMsc());
+            deal->RateMargin(orders->at(i)->RateMargin());
+            deal->Order(orders->at(i)->Order());
+            deal->PositionID(orders->at(i)->Order());
             deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
-            deal->ReasonSet(order->Reason());
+            deal->ReasonSet(orders->at(i)->Reason());
 
             //try to create on server
             int errors = 0;
@@ -546,21 +544,21 @@ private:
             }
 
             if (errors > 10)
-                LOG_ERROR() << "Can't create lock deal for order and position " << order->Order() << ". Skip.";
+                LOG_ERROR() << "Can't create lock deal for order and position " << orders->at(i)->Order() << ". Skip.";
         }
 
         METHOD_END();
     }
 
-    bool fixPositions(const std::vector<IMTOrder*> orders)
+    bool fixPositions(const std::vector<WIMTOrder>* orders)
     {
         METHOD_BEGIN();
 
         WIMTPositionArray positions(serverApi);
 
         std::vector<UINT64> logins;
-        for (auto order : orders)
-            logins.push_back(order->Login());
+        for (int i = 0; i < orders->size(); i++)
+            logins.push_back(orders->at(i)->Login());
         logins.erase(unique(logins.begin(), logins.end()), logins.end());
 
         for (auto login : logins)
