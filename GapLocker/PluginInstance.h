@@ -149,11 +149,13 @@ public:
         {
             return (retcode);
         }
-
-        bool isReadedAllParams = SettingsReader::Read(serverApi, pluginSettings);
-        if (!isReadedAllParams)
+        
         {
-            return (MT_RET_ERR_PARAMS);
+            LOCK();
+            if (!SettingsReader::Read(serverApi, pluginSettings))
+            {
+                return (MT_RET_ERR_PARAMS);
+            }
         }
 
         LOG_FILE() << "Thread-loop starting...";
@@ -179,8 +181,10 @@ public:
             return;
         }
 
-        SettingsReader::Read(serverApi, pluginSettings);
-        //SettingsReader::Print(userSettings);
+        {
+            LOCK();
+            SettingsReader::Read(serverApi, pluginSettings);
+        }
 
         SAFE_END();
     }
