@@ -390,13 +390,16 @@ private:
         std::vector<WIMTPosition> positions;
         MTAPIRES retcode;
 
+        std::string groups;
         {
             LOCK();
-            if ((retcode = serverApi->PositionGetByGroup(pluginbase::tools::StringToWide(pluginSettings.Groups).c_str(), allPositions)) != MT_RET_OK)
-            {
-                LOG_ERROR() << "Cannot get open positions for group mask '" << pluginSettings.Groups << "' from server: " << retcode;
-                return positions;
-            }
+            groups = pluginSettings.Groups;
+        }
+
+        if ((retcode = serverApi->PositionGetByGroup(pluginbase::tools::StringToWide(groups).c_str(), allPositions)) != MT_RET_OK)
+        {
+            LOG_ERROR() << "Cannot get open positions for group mask '" << groups << "' from server: " << retcode;
+            return positions;
         }
 
         LOG_FILE() << "Positions detected: " << allPositions->Total();
