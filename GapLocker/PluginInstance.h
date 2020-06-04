@@ -193,7 +193,7 @@ public:
         SAFE_BEGIN();
         LOCK();
         
-        std::string s = pluginbase::tools::WideToString(symbol).c_str();
+        std::string s = pluginbase::tools::WideToString(symbol);
         auto symbolObj = pluginSettings.Symbols.find(s);
         if (symbolObj == pluginSettings.Symbols.end())
             return;
@@ -311,7 +311,7 @@ private:
         SAFE_END(0);
     }
 
-    void getPricesForLockingPosition(std::shared_ptr<Symbol> symbol, std::optional<double> &buyPrice, std::optional<double> &sellPrice)
+    void getPricesForLockingPosition(std::shared_ptr<Symbol> symbol, std::optional<double> &buyPrice, std::optional<double> &sellPrice) const
     {
         METHOD_BEGIN();
         
@@ -328,26 +328,28 @@ private:
         double bidOpen = symbol->SessionStartInfo->bid;
         double bidClose = symbol->SessionEndInfo->bid;
 
-        if (bidClose > bidOpen && bidClose - bidOpen >= symbol->Points * wrapper->Point())
-            buyPrice = bidClose - symbol->Points * wrapper->Point();
-        else if (bidOpen > bidClose && bidOpen - bidClose >= symbol->Points * wrapper->Point())
-            buyPrice = bidClose + symbol->Points * wrapper->Point();
+        auto threshold = symbol->Points * wrapper->Point();
+        if (std::abs(bidClose - bidOpen) >= threshold)
+        {
+            buyPrice = bidClose > bidOpen ? bidClose - threshold : bidClose + threshold;
+        }
 
         //check ask for creation lock-sell position
         double askOpen = symbol->SessionStartInfo->ask;
         double askClose = symbol->SessionEndInfo->ask;
 
-        if (askClose > askOpen && askClose - askOpen >= symbol->Points * wrapper->Point())
-            sellPrice = askClose - symbol->Points * wrapper->Point();
-        else if (askOpen > askClose && askOpen - askClose >= symbol->Points * wrapper->Point())
-            sellPrice = askClose + symbol->Points * wrapper->Point();
+        threshold = symbol->Points * wrapper->Point();
+        if (std::abs(askClose - askOpen) >= threshold)
+        {
+            sellPrice = askClose > askOpen ? askClose - threshold : askClose + threshold;
+        }
         
         return;
 
         METHOD_END();
     }
 
-    void openLockPositions(std::optional<double> buyPrice, std::optional<double> sellPrice, std::string symbol, INT64 time)
+    void openLockPositions(std::optional<double> buyPrice, std::optional<double> sellPrice, const std::string& symbol, INT64 time) const
     {
         METHOD_BEGIN();
 
@@ -380,7 +382,7 @@ private:
         METHOD_END();
     }
 
-    std::vector<WIMTPosition> getPositionsBySymbolAndOperation(const std::string& symbol)
+    std::vector<WIMTPosition> getPositionsBySymbolAndOperation(const std::string& symbol) const
     {
         METHOD_BEGIN();
 
@@ -414,7 +416,7 @@ private:
         METHOD_END();
     }
 
-    const std::vector<WIMTOrder> CreateOrderArray(const std::vector<WIMTPosition> &positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time)
+    std::vector<WIMTOrder> CreateOrderArray(const std::vector<WIMTPosition> &positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time) const
     {
         METHOD_BEGIN();
 
@@ -482,8 +484,7 @@ private:
 
                 LOG_FILE() << "Locking order " << order->Order() << " for position " << position->Position() << " has been created";
                 
-                orders.emplace_back(serverApi);
-                orders.back()->Assign(order);
+                orders.emplace_back(std::move(order));
                 break;
             }
 
@@ -496,7 +497,7 @@ private:
         METHOD_END();
     }
 
-    const void CreateDealArray(const std::vector<WIMTOrder> &orders)
+    void CreateDealArray(const std::vector<WIMTOrder> &orders) const
     {
         METHOD_BEGIN();
 
@@ -550,7 +551,7 @@ private:
         METHOD_END();
     }
 
-    bool fixPositions(const std::vector<WIMTOrder> &orders)
+    bool fixPositions(const std::vector<WIMTOrder> &orders) const
     {
         METHOD_BEGIN();
 
