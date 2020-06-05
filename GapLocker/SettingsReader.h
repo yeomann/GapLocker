@@ -38,24 +38,25 @@ public:
                 continue;
             }
 
-            std::string name = pluginbase::tools::WideToString(param->Name()).c_str();
+            std::string name = pluginbase::tools::WideToString(param->Name());
             
             if (name == "Groups") 
             {
-                pluginSettings.Groups = pluginbase::tools::WideToString(param->Value()).c_str();
+                pluginSettings.Groups = pluginbase::tools::WideToString(param->Value());
                 continue;
             }
 
             if (name == "Status")
             {
-                pluginSettings.Status = pluginbase::tools::WideToString(param->Value()).c_str();
+                pluginSettings.Status = pluginbase::tools::WideToString(param->Value());
                 continue;
             }
 
             if (name == "SkipDays")
             {
-                std::string value = pluginbase::tools::WideToString(param->Value()).c_str();
-                auto arr = getSplittedArrayByDelimiter(value, ',');
+                std::string value = pluginbase::tools::WideToString(param->Value());
+                std::vector<std::string> arr;
+                boost::split(arr, value, [&](char c) { return c == ','; });
                 for (auto& day : arr)
                 {
                     try
@@ -73,7 +74,7 @@ public:
 
             if (name == "DebugLogs")
             {
-                pluginSettings.DebugLogs = parseBoolField(pluginbase::tools::WideToString(param->Value()).c_str());
+                pluginSettings.DebugLogs = parseBoolField(pluginbase::tools::WideToString(param->Value()));
                 continue;
             }
 
@@ -117,31 +118,31 @@ private:
     {
         try 
         {
-            std::string value = pluginbase::tools::WideToString(param->Value()).c_str();
+            std::string value = pluginbase::tools::WideToString(param->Value());
             //check value
-            std::regex temp("(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]-(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9];[0-9][0-9]*");
-            if (!regex_match(value, temp))
+            std::regex regexstr("(0\\d|1\\d|2[0-3]):([0-5]\\d)\\s*-\\s*(0\\d|1\\d|2[0-3]):([0-5]\\d)\s*;\\s*(\\d+)");
+            std::smatch matchResults;
+            if (!regex_match(value, matchResults, regexstr))
             {
-                LOG_FILE() << "Cannot parse '" << name << "' symbol value [ " << value << " ]. Skip";
+                LOG_FILE() << "Cannot parse '" << name << "' symbol value [" << value << "]. Skip";
                 return;
             }
-            auto arr1 = getSplittedArrayByDelimiter(value, ';');
-            auto arr2 = getSplittedArrayByDelimiter(arr1[0], '-');
 
             auto symbol = std::make_shared<Symbol>();
             symbol->Name = name;
-            symbol->BeginTimeOffset = getTimeFromString(arr2[0]);
-            symbol->EndTimeOffset = getTimeFromString(arr2[1]);
+            symbol->BeginTimeOffset = std::stoi(matchResults[1].str()) * SECONDS_IN_HOUR + std::stoi(matchResults[2].str()) * SECONDS_IN_MINUTE;
+            symbol->EndTimeOffset = std::stoi(matchResults[3].str()) * SECONDS_IN_HOUR + std::stoi(matchResults[4].str())* SECONDS_IN_MINUTE;
 
             if (symbol->BeginTimeOffset > symbol->EndTimeOffset)
                 symbol->EndTimeOffset += SECONDS_IN_DAY;
 
-            symbol->Points = std::stoi(arr1[1]);
+            symbol->Points = std::stoi(matchResults[5].str());
 
             pluginSettings.Symbols[name] = symbol;
 
-            LOG_FILE() << "Added new symbol '" << name << "' with parameters Time = " << arr1[0] << " (startOffset = "
-                << symbol->BeginTimeOffset << ", endOffset = " << symbol->EndTimeOffset << ") and Points = " << symbol->Points;
+            LOG_FILE() << "Added new symbol '" << name << "' with parameters Time = " << matchResults[1].str() << ":" << matchResults[2].str() 
+                << " - " << matchResults[3].str() << ":" << matchResults[4].str() << " (startOffset = " << symbol->BeginTimeOffset 
+                << ", endOffset = " << symbol->EndTimeOffset << ") and Points = " << symbol->Points;
         }
         catch (const std::exception & ex)
         {
@@ -168,19 +169,6 @@ private:
         LOG_ERROR() << "Can't decide whether '" << field << "' should disable the rule. Assuming `enabled`.";
         return false;
         METHOD_END();
-    }
-
-    static time_t getTimeFromString(std::string& value) 
-    {
-        auto arr = getSplittedArrayByDelimiter(value, ':');
-        return std::stoi(arr[0]) * SECONDS_IN_HOUR + std::stoi(arr[1]) * SECONDS_IN_MINUTE;
-    }
-
-    static std::vector<std::string> getSplittedArrayByDelimiter(std::string &str, char delimiter)
-    {
-        std::vector<std::string> arr;
-        boost::split(arr, str, [&](char c) { return c == delimiter; });
-        return arr;
     }
 
     static boost::gregorian::greg_weekday dayNameToGregWeekday(const std::string& day)
