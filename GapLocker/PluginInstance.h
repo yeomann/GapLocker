@@ -31,7 +31,7 @@ private:
 
     PluginSettings pluginSettings;
 
-    bool deb = true;
+    bool checkIfAlreadyStarted = true;
 
     enum { LOOP_DELAY_IN_MILLISECONDS = 50, TIMEOUT_CHECK_STATE = 50, MILLISECONDS_IN_SEC = 1000 };
 
@@ -199,23 +199,25 @@ public:
 
         auto smb = symbolObj->second;
 
-        time_t currentSessionStart = smb->GetTimeWithOffset(smb->BeginTimeOffset, tick.datetime);
-        time_t currentSessionEnd = smb->GetTimeWithOffset(smb->EndTimeOffset, tick.datetime);
+        time_t currentSessionStart;
+
+        //check if session already started and is still active on plugin start 
+        if (checkIfAlreadyStarted)
+        {
+            currentSessionStart = smb->GetStartTimeWithOffset(tick.datetime - SECONDS_IN_DAY);
+        }
+        else
+        {
+            currentSessionStart = smb->GetStartTimeWithOffset(tick.datetime);
+        }
+
+        time_t currentSessionEnd = smb->GetEndTimeWithOffset(currentSessionStart);
 
         if (currentSessionStart <= tick.datetime && currentSessionEnd > tick.datetime)
         {
             //check start
             if (smb->SessionStartInfo == std::nullopt)
             {
-                //for debug uncomment the following block  
-                /*if (deb)
-                {
-                    smb->SessionEndInfo = tick;
-                    deb = false;
-                    MAGIC_SLEEP(SECONDS_IN_MINUTE / 3);
-                    return;
-                }*/
-
                 smb->SessionStartInfo = tick;
                 LOG_FILE() << "Session Started";
 
@@ -242,6 +244,9 @@ public:
         }
         else
         {
+            if (checkIfAlreadyStarted)
+                checkIfAlreadyStarted = false;
+
             if (smb->SessionStartInfo != std::nullopt)
             {
                 smb->SessionStartInfo = std::nullopt;
