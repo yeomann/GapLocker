@@ -31,8 +31,6 @@ private:
 
     PluginSettings pluginSettings;
 
-    bool deb = true;
-
     enum { LOOP_DELAY_IN_MILLISECONDS = 50, TIMEOUT_CHECK_STATE = 50, MILLISECONDS_IN_SEC = 1000 };
 
     MUTEX();
@@ -199,23 +197,20 @@ public:
 
         auto smb = symbolObj->second;
 
-        time_t currentSessionStart = smb->GetTimeWithOffset(smb->BeginTimeOffset, tick.datetime);
-        time_t currentSessionEnd = smb->GetTimeWithOffset(smb->EndTimeOffset, tick.datetime);
+        time_t currentSessionStart = smb->GetStartTimeWithOffset(tick.datetime);
+        time_t currentSessionEnd = smb->GetEndTimeWithOffset(currentSessionStart);
+
+        if (currentSessionStart > tick.datetime)
+        {
+            currentSessionStart -= SECONDS_IN_DAY;
+            currentSessionEnd -= SECONDS_IN_DAY;
+        }
 
         if (currentSessionStart <= tick.datetime && currentSessionEnd > tick.datetime)
         {
             //check start
             if (smb->SessionStartInfo == std::nullopt)
             {
-                //for debug uncomment the following block  
-                /*if (deb)
-                {
-                    smb->SessionEndInfo = tick;
-                    deb = false;
-                    MAGIC_SLEEP(SECONDS_IN_MINUTE / 3);
-                    return;
-                }*/
-
                 smb->SessionStartInfo = tick;
                 LOG_FILE() << "Session Started";
 

@@ -19,17 +19,25 @@ struct Symbol
         SessionStartInfo(std::nullopt), 
         SessionEndInfo(std::nullopt){}
 
-    time_t GetTimeWithOffset(time_t offset, time_t current) 
+    time_t GetStartTimeWithOffset(time_t current) 
     {
         auto t = gmtime(&current);
-
-        //if offset is more than a day and it's a new day now
-        bool newDay = (offset - SECONDS_IN_DAY > 0) && (t->tm_hour <= gmtime(&SessionStartInfo->datetime)->tm_hour);
 
         t->tm_hour = 0;
         t->tm_min = 0;
         t->tm_sec = 0;
 
-        return mktime(t) + ((newDay) ? offset - SECONDS_IN_DAY : offset);
+        return mktime(t) + BeginTimeOffset;
+    }
+
+    time_t GetEndTimeWithOffset(time_t currentSessionStart) 
+    {
+        auto t = gmtime(&currentSessionStart);
+
+        t->tm_hour = 0;
+        t->tm_min = 0;
+        t->tm_sec = 0;
+
+        return mktime(t) + EndTimeOffset;
     }
 };
