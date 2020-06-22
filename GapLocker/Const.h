@@ -10,7 +10,7 @@
 
 #include <pluginbase/copyright.h>
 
-#define PLUGIN_VERSION      100
+#define PLUGIN_VERSION      101
 #define PLUGIN_NAME         "GapLocker"
 #define PLUGIN_COPYRIGHT COPYRIGHT
 
