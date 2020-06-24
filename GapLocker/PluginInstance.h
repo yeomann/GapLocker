@@ -228,8 +228,6 @@ public:
                             });
                     }
                 }
-
-                return;
             }
 
             //set end
