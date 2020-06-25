@@ -209,8 +209,12 @@ public:
         if (currentSessionStart <= tick.datetime && currentSessionEnd > tick.datetime)
         {
             //check start
-            if (smb->SessionStartInfo == std::nullopt)
+            bool newSession = smb->SessionStartInfo != std::nullopt && smb->SessionStartInfo->datetime + SECONDS_IN_DAY >= currentSessionStart;
+            if (smb->SessionStartInfo == std::nullopt || newSession)
             {
+                if (newSession)
+                    LOG_FILE() << "Current session has ended.";
+
                 smb->SessionStartInfo = tick;
                 LOG_FILE() << "Session Started";
 
@@ -232,14 +236,6 @@ public:
 
             //set end
             smb->SessionEndInfo = tick; 
-        }
-        else
-        {
-            if (smb->SessionStartInfo != std::nullopt)
-            {
-                smb->SessionStartInfo = std::nullopt;
-                LOG_FILE() << "Current session has ended.";
-            }
         }
 
         SAFE_END();
