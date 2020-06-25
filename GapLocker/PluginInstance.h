@@ -209,7 +209,7 @@ public:
         if (currentSessionStart <= tick.datetime && currentSessionEnd > tick.datetime)
         {
             //check start
-            bool newSession = smb->SessionStartInfo != std::nullopt && smb->SessionStartInfo->datetime + SECONDS_IN_DAY >= currentSessionStart;
+            bool newSession = smb->SessionStartInfo != std::nullopt && smb->SessionStartInfo->datetime < currentSessionStart;
             if (smb->SessionStartInfo == std::nullopt || newSession)
             {
                 if (newSession)
