@@ -313,7 +313,7 @@ private:
         const auto threshold = symbol->Points * wrapper->Point();
         if (std::abs(bidClose - bidOpen) >= threshold)
         {
-            buyPrice = bidClose > bidOpen ? bidClose - threshold : bidClose + threshold;
+            sellPrice = bidClose > bidOpen ? bidClose - threshold : bidClose + threshold;
         }
 
         //check ask for creation lock-sell position
@@ -322,7 +322,7 @@ private:
 
         if (std::abs(askClose - askOpen) >= threshold)
         {
-            sellPrice = askClose > askOpen ? askClose - threshold : askClose + threshold;
+            buyPrice = askClose > askOpen ? askClose - threshold : askClose + threshold;
         }
         
         return;
