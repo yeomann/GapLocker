@@ -337,14 +337,17 @@ private:
         auto positions = getPositionsBySymbol(symbol);
         if (positions.size() == 0)
         {
+            LOG_FILE() << "No opened positions has been found after the gap.";
             return;
         }
+
+        LOG_FILE() << "Start creating lock positions for symbol '" << symbol << "' with buyPrice = " << buyPrice.value_or(0.0) << " and sellPrice = " << sellPrice.value_or(0.0);
 
         //create orders
         auto orders = CreateOrderArray(positions, buyPrice, sellPrice, time);
         if (orders.size() == 0)
         {
-            LOG_ERROR() << "Can't create order array for symbol '" << symbol << "'. Skip.";
+            LOG_ERROR() << "No orders for symbol '" << symbol << "' has been created. Skip.";
             return;
         }
 
@@ -423,6 +426,7 @@ private:
             }
             else
             {
+                LOG_FILE() << "Skip creating order for position '" << position->Position() << "' with reason: no price detected.";
                 continue;
             }
 
