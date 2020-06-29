@@ -403,12 +403,25 @@ private:
         METHOD_END();
     }
 
-    std::vector<WIMTOrder> CreateOrderArray(const std::vector<WIMTPosition> &positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time) const
+    class OrderExtended
+    {
+    public:
+            OrderExtended(const std::shared_ptr<WIMTOrder> order, double rateProfit)
+            {
+                Order = order;
+                RateProfit = rateProfit;
+            }
+
+            std::shared_ptr<WIMTOrder> Order;
+            double RateProfit;
+    };
+
+    std::vector<OrderExtended> CreateOrderArray(const std::vector<WIMTPosition> &positions, std::optional<double> buyPrice, std::optional<double> sellPrice, INT64 time) const
     {
         METHOD_BEGIN();
 
         //create orders array
-        std::vector<WIMTOrder> orders;
+        std::vector<OrderExtended> extendedOrders;
         IMTOrder::EnOrderType action;
         double price;
 
@@ -430,31 +443,32 @@ private:
                 continue;
             }
 
-            WIMTOrder order(serverApi);
-            order->Login(position->Login());
-            order->Symbol(position->Symbol());
-            order->Type(action);
-            order->Digits(position->Digits());
-            order->DigitsCurrency(position->DigitsCurrency());
-            order->ContractSize(position->ContractSize());
-            order->VolumeInitial(position->Volume());
-            order->VolumeCurrent(0);
-            order->PriceOrder(price);
-            order->PriceCurrent(price);
-            order->PriceSL(0);
-            order->PriceTP(0);
-            order->RateMargin(position->RateMargin());
-            order->TypeFill(IMTOrder::EnOrderFilling::ORDER_FILL_RETURN);
-            order->TimeSetupMsc(time);
-            order->TimeDoneMsc(time);
-            order->ReasonSet(IMTOrder::EnOrderReason::ORDER_REASON_DEALER);
-            order->StateSet(IMTOrder::EnOrderState::ORDER_STATE_FILLED);
+            std::shared_ptr<WIMTOrder> order = std::make_shared<WIMTOrder>(serverApi);
+            (*order)->Login(position->Login());
+            (*order)->Symbol(position->Symbol());
+            (*order)->Type(action);
+            (*order)->Digits(position->Digits());
+            (*order)->DigitsCurrency(position->DigitsCurrency());
+            (*order)->ContractSize(position->ContractSize());
+            (*order)->VolumeInitial(position->Volume());
+            (*order)->VolumeCurrent(0);
+            (*order)->PriceOrder(price);
+            (*order)->PriceCurrent(price);
+            (*order)->PriceSL(0);
+            (*order)->PriceTP(0);
+            (*order)->RateMargin(position->RateMargin());
+            (*order)->TypeFill(IMTOrder::EnOrderFilling::ORDER_FILL_RETURN);
+            (*order)->TimeSetupMsc(time);
+            (*order)->TimeDoneMsc(time);
+            (*order)->ReasonSet(IMTOrder::EnOrderReason::ORDER_REASON_DEALER);
+            (*order)->StateSet(IMTOrder::EnOrderState::ORDER_STATE_FILLED);
+            (*order)->Comment(L"Open Gap");
             
             //try to create on server
             int errors = 0;
             while (errors <= 10)
             {
-                MTAPIRES retcode = serverApi->HistoryAdd(order);
+                MTAPIRES retcode = serverApi->HistoryAdd(*order);
                 if (retcode == MT_RET_ERR_NETWORK || retcode == MT_RET_ERR_FREQUENT || retcode == MT_RET_REQUEST_TOO_MANY || retcode == MT_RET_REQUEST_TIMEOUT)
                 {
                     //wait 1 sec and just try again
@@ -470,9 +484,8 @@ private:
                     continue;
                 }
 
-                LOG_FILE() << "Locking order " << order->Order() << " for position " << position->Position() << " has been created";
-                
-                orders.emplace_back(std::move(order));
+                LOG_FILE() << "Locking order " << (*order)->Order() << " for position " << position->Position() << " has been created";
+                extendedOrders.emplace_back(order, position->RateProfit());
                 break;
             }
 
@@ -480,18 +493,19 @@ private:
                 LOG_ERROR() << "Can't create lock order for position " << position->Position() << ". Skip creating locking position";
         }
 
-        return orders;
+        return extendedOrders;
 
         METHOD_END();
     }
 
-    void CreateDealArray(const std::vector<WIMTOrder> &orders) const
+    void CreateDealArray(const std::vector<OrderExtended> & extendedOrders) const
     {
         METHOD_BEGIN();
 
         //create deals
-        for (const auto& order : orders)
+        for (const auto& extendedOrder : extendedOrders)
         {
+            const auto& order = *extendedOrder.Order;
             WIMTDeal deal(serverApi);
             deal->Login(order->Login());
             deal->Symbol(order->Symbol());
@@ -507,6 +521,8 @@ private:
             deal->PositionID(order->Order());
             deal->Entry(IMTDeal::EnDealEntry::ENTRY_OUT);
             deal->ReasonSet(order->Reason());
+            deal->Comment(L"Open Gap");
+            deal->RateProfit(extendedOrder.RateProfit);
 
             //try to create on server
             int errors = 0;
@@ -539,15 +555,17 @@ private:
         METHOD_END();
     }
 
-    bool fixPositions(const std::vector<WIMTOrder> &orders) const
+    bool fixPositions(const std::vector<OrderExtended>& extendedOrders) const
     {
         METHOD_BEGIN();
 
         WIMTPositionArray positions(serverApi);
 
         std::set<UINT64> logins;
-        for (const auto& order : orders)
-            logins.insert(order->Login());
+        for (const auto& extendedOrder : extendedOrders)
+        {
+            logins.insert((*extendedOrder.Order)->Login());
+        }
 
         for (auto login : logins)
         {
